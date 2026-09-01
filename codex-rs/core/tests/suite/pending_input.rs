@@ -6,6 +6,7 @@ use codex_core::StartIfIdleSubmission;
 use codex_core::TurnInput;
 use codex_core::TurnInputRequest;
 use codex_core::TurnInputSubmission;
+use codex_core::TurnStartOptions;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_extension_items::ExtensionItem;
 use codex_extension_items::sleep::SleepItem;
@@ -28,6 +29,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
@@ -112,6 +114,44 @@ async fn idle_response_items_include_pending_mailbox_in_first_request() -> anyho
                     })
             })
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn standalone_tool_output_starts_instruction_turn() -> anyhow::Result<()> {
+    let server = responses::start_mock_server().await;
+    let response = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![ev_response_created("turn"), ev_completed("turn")]),
+    )
+    .await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+
+    let expected_output = json!({
+        "type": "function_call_output",
+        "name": "send_message_to_thread",
+        "namespace": "codex_app",
+        "output": "delegated work",
+    });
+    let output = serde_json::from_value(expected_output.clone())?;
+
+    let submission = test
+        .codex
+        .start_or_steer_turn(TurnInputRequest::new(TurnInput::ResponseItem(output)))
+        .await?;
+    let TurnInputSubmission::Started { turn_id } = submission else {
+        panic!("standalone output should start a turn");
+    };
+    wait_for_turn_complete(test.codex.as_ref()).await;
+
+    let request = response.single_request();
+    responses::assert_root_turn(&request.body_json(), Some(&turn_id))?;
+    let output = &request.inputs_of_type("function_call_output")[0];
+    assert_eq!(output["name"], expected_output["name"]);
+    assert_eq!(output["namespace"], expected_output["namespace"]);
+    assert_eq!(output["output"], expected_output["output"]);
+    assert!(output.get("call_id").is_none());
 
     Ok(())
 }
@@ -276,6 +316,7 @@ fn response_completed_chunks(response_id: &str) -> Vec<StreamingSseChunk> {
 
 async fn build_codex(server: &StreamingSseServer) -> Arc<CodexThread> {
     test_codex()
+        .with_config(|config| config.update_plan_enabled = true)
         .with_model("gpt-5.4")
         .build_with_streaming_server(server)
         .await
@@ -343,6 +384,7 @@ async fn enqueue_queue_only_agent_mail(codex: &CodexThread, text: &str) {
                 text.to_string(),
                 /*trigger_turn*/ false,
             ),
+            start_options: Default::default(),
         })
         .await
         .expect("submit queue-only agent mail");
@@ -457,26 +499,55 @@ impl codex_extension_api::ThreadLifecycleContributor<codex_core::config::Config>
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queue_only_agent_mail_wakes_sleeping_root_and_persists_message() {
+async fn queue_only_agent_mail_wakes_sleeping_root_with_previous_turn_context() {
     const CHILD_MESSAGE: &str = "worker completed";
 
-    let (server, _completions) =
-        start_streaming_sse_server(vec![response_completed_chunks("resp-1")]).await;
+    let server = responses::start_mock_server().await;
+    let requests = responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse_completed("resp-initial"),
+            responses::sse_completed("resp-wake"),
+        ],
+    )
+    .await;
     let mut extensions =
         codex_extension_api::ExtensionRegistryBuilder::<codex_core::config::Config>::new();
     extensions.thread_lifecycle_contributor(Arc::new(SleepingRootExtension));
     let codex = test_codex()
         .with_model("gpt-5.4")
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_extensions(Arc::new(extensions.build()))
-        .build_with_streaming_server(&server)
+        .build_with_auto_env(&server)
         .await
         .expect("build Codex test session")
         .codex;
 
+    codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "wait for the worker".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .on_start(TurnStartOptions {
+                cyber_access_program: Some(CyberAccessProgram::Standard),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("start initial turn");
+    wait_for_turn_complete(&codex).await;
     enqueue_queue_only_agent_mail(&codex, CHILD_MESSAGE).await;
     wait_for_turn_complete(&codex).await;
 
-    assert_eq!(server.requests().await.len(), 1);
+    assert_eq!(
+        requests
+            .requests()
+            .iter()
+            .map(|request| request.body_json()["access_programs"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!({"cyber": "standard"}); 2],
+    );
     let history = codex
         .load_history(/*include_archived*/ true)
         .await
@@ -973,6 +1044,7 @@ async fn queued_inter_agent_mail_does_not_restart_after_final_answer() {
 async fn injected_response_item_reopens_turn_after_final_answer() {
     const INITIAL_PROMPT: &str = "first prompt";
     const INJECTED_CONTEXT: &str = "late injected context";
+    const EXTERNAL_CONTEXT: &str = "external injected context";
     let (gate_completed_tx, gate_completed_rx) = oneshot::channel();
 
     let first_chunks = vec![
@@ -1013,18 +1085,35 @@ async fn injected_response_item_reopens_turn_after_final_answer() {
             .await
             .is_ok()
     );
+    codex
+        .inject_response_items(vec![responses::user_message_item(EXTERNAL_CONTEXT)])
+        .await
+        .expect("external context should be injected");
     let _ = gate_completed_tx.send(());
 
     wait_for_turn_complete(&codex).await;
 
     let requests = server.requests().await;
     assert_eq!(requests.len(), 2);
+    let first: Value = from_slice(&requests[0]).expect("parse first request");
+    let first_turn_id = first["client_metadata"]["turn_id"]
+        .as_str()
+        .expect("first request should include its turn ID");
+    responses::assert_root_turn(&first, Some(first_turn_id))
+        .expect("initial root should be trusted");
     let second: Value = from_slice(&requests[1]).expect("parse second request");
+    responses::assert_root_turn(&second, Some(first_turn_id))
+        .expect("external injection should preserve the active turn root");
     let relevant_user_input = message_input_texts(&second, "user")
         .into_iter()
-        .filter(|text| text == INITIAL_PROMPT || text == INJECTED_CONTEXT)
+        .filter(|text| {
+            text == INITIAL_PROMPT || text == INJECTED_CONTEXT || text == EXTERNAL_CONTEXT
+        })
         .collect::<Vec<_>>();
-    assert_eq!(relevant_user_input, vec![INITIAL_PROMPT, INJECTED_CONTEXT]);
+    assert_eq!(
+        relevant_user_input,
+        vec![INITIAL_PROMPT, INJECTED_CONTEXT, EXTERNAL_CONTEXT]
+    );
 
     server.shutdown().await;
 }
@@ -1199,6 +1288,7 @@ async fn terminal_compaction_error_does_not_retry_pending_input(
                         PENDING_MESSAGE.to_string(),
                         /*trigger_turn*/ true,
                     ),
+                    start_options: Default::default(),
                 })
                 .await?;
             codex.submit(Op::RealtimeConversationListVoices).await?;

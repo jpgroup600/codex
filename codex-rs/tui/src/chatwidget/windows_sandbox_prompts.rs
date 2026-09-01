@@ -48,13 +48,15 @@ impl ChatWidget {
         else {
             return None;
         };
-        match codex_windows_sandbox::apply_world_writable_scan_and_denies_for_permissions(
+        let result = codex_windows_sandbox::apply_world_writable_scan_and_denies_for_permissions(
             self.config.codex_home.as_path(),
             cwd.as_path(),
             &env_map,
             &permissions,
             Some(self.config.codex_home.as_path()),
-        ) {
+        );
+        crate::windows_sandbox::record_world_writable_scan_result(&self.session_telemetry, &result);
+        match result {
             Ok(_) => None,
             Err(_) => Some((Vec::new(), 0, true)),
         }
@@ -477,7 +479,7 @@ impl ChatWidget {
     #[cfg(not(target_os = "windows"))]
     pub(crate) fn maybe_prompt_windows_sandbox_enable(&mut self, _show_now: bool) {}
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     pub(crate) fn show_windows_sandbox_setup_status(&mut self) {
         // While elevated sandbox setup runs, prevent typing so the user doesn't
         // accidentally queue messages that will run under an unexpected mode.
@@ -485,6 +487,7 @@ impl ChatWidget {
             /*enabled*/ false,
             Some("Input disabled until setup completes.".to_string()),
         );
+        self.bottom_pane.reset_status_timer(Duration::ZERO);
         self.bottom_pane.ensure_status_indicator();
         self.bottom_pane
             .set_interrupt_hint_visible(/*visible*/ false);
@@ -497,11 +500,11 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", test)))]
     #[allow(dead_code)]
     pub(crate) fn show_windows_sandbox_setup_status(&mut self) {}
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     pub(crate) fn clear_windows_sandbox_setup_status(&mut self) {
         self.bottom_pane
             .set_composer_input_enabled(/*enabled*/ true, /*placeholder*/ None);
@@ -509,6 +512,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", test)))]
     pub(crate) fn clear_windows_sandbox_setup_status(&mut self) {}
 }

@@ -2,10 +2,20 @@
 
 #[path = "tests/advanced_reasoning_tests.rs"]
 mod advanced_reasoning_tests;
+#[path = "tests/agents_navigation_tests.rs"]
+mod agents_navigation_tests;
+#[path = "tests/backend_banner_fallback_tests.rs"]
+mod backend_banner_fallback_tests;
+#[path = "tests/backend_banner_recovery_tests.rs"]
+mod backend_banner_recovery_tests;
+#[path = "tests/backend_banner_startup_tests.rs"]
+mod backend_banner_startup_tests;
 #[path = "tests/background_exit_tests.rs"]
 mod background_exit_tests;
 #[path = "tests/connector_policy.rs"]
 mod connector_policy;
+#[path = "tests/disconnect_tests.rs"]
+mod disconnect;
 #[path = "tests/key_chords.rs"]
 mod key_chords;
 #[path = "tests/mcp_startup.rs"]
@@ -17,11 +27,15 @@ mod patch_approval_tests;
 mod permission_shortcuts_tests;
 mod plugin_catalog;
 mod rate_limits;
+#[path = "tests/recap_generation_tests.rs"]
+mod recap_generation;
 mod safety_buffering;
 #[path = "tests/session_lifecycle_requests.rs"]
 mod session_lifecycle_requests;
 mod session_summary;
 mod startup;
+#[path = "tests/stream_animation_tests.rs"]
+mod stream_animation_tests;
 #[path = "tests/thread_usage.rs"]
 mod thread_usage;
 #[path = "tests/turn_submission.rs"]
@@ -5433,7 +5447,7 @@ async fn make_test_app() -> App {
         enhanced_keys_supported: false,
         keymap: crate::keymap::RuntimeKeymap::defaults(),
         key_chord_matcher: crate::keymap::KeyChordMatcher::default(),
-        commit_anim_running: Arc::new(AtomicBool::new(false)),
+        commit_animation: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
         terminal_title_invalid_items_warned: Arc::new(AtomicBool::new(false)),
         skill_load_warnings: SkillLoadWarningState::default(),
@@ -5443,6 +5457,7 @@ async fn make_test_app() -> App {
         feedback_audience: FeedbackAudience::External,
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         app_server_target: crate::AppServerTarget::Embedded,
+        reconnect: Default::default(),
         pending_update_action: None,
         pending_shutdown_exit_thread_id: None,
         windows_sandbox: WindowsSandboxState::default(),
@@ -5466,8 +5481,10 @@ async fn make_test_app() -> App {
         startup_protected_input_boundary: false,
         startup_pending_protected_request: false,
         rate_limit_hard_stop_generation: 0,
+        rate_limit_refresh_state: Default::default(),
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),
+        recap: recap::RecapState::default(),
     }
 }
 
@@ -5513,7 +5530,7 @@ async fn make_test_app_with_channels() -> (
             enhanced_keys_supported: false,
             keymap: crate::keymap::RuntimeKeymap::defaults(),
             key_chord_matcher: crate::keymap::KeyChordMatcher::default(),
-            commit_anim_running: Arc::new(AtomicBool::new(false)),
+            commit_animation: None,
             status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
             terminal_title_invalid_items_warned: Arc::new(AtomicBool::new(false)),
             skill_load_warnings: SkillLoadWarningState::default(),
@@ -5523,6 +5540,7 @@ async fn make_test_app_with_channels() -> (
             feedback_audience: FeedbackAudience::External,
             environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
             app_server_target: crate::AppServerTarget::Embedded,
+            reconnect: Default::default(),
             pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
@@ -5546,8 +5564,10 @@ async fn make_test_app_with_channels() -> (
             startup_protected_input_boundary: false,
             startup_pending_protected_request: false,
             rate_limit_hard_stop_generation: 0,
+            rate_limit_refresh_state: Default::default(),
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
+            recap: recap::RecapState::default(),
         },
         rx,
         op_rx,
@@ -6491,6 +6511,7 @@ fn test_session_telemetry(config: &Config, model: &str) -> SessionTelemetry {
 #[test]
 fn active_turn_not_steerable_turn_error_extracts_structured_server_error() {
     let turn_error = AppServerTurnError {
+        misalignment: None,
         message: "cannot steer a review turn".to_string(),
         codex_error_info: Some(AppServerCodexErrorInfo::ActiveTurnNotSteerable {
             turn_kind: AppServerNonSteerableTurnKind::Review,
@@ -7709,6 +7730,13 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
     let store_snapshot = store.snapshot();
     assert_eq!(store_snapshot.session, Some(resumed_session));
     assert_eq!(store_snapshot.turns, snapshot.turns);
+    assert_eq!(
+        store.recap_progress(),
+        recap::RecapProgress {
+            completed_turns: 1,
+            last_recapped_turn_count: None,
+        }
+    );
 }
 
 #[tokio::test]
@@ -8607,3 +8635,10 @@ async fn side_backtrack_rejection_reports_unavailable_message_snapshot() {
 async fn start_config_write_test_app_server(app: &App) -> Result<AppServerSession> {
     Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await
 }
+
+#[path = "tests/active_reconnect_tests.rs"]
+mod active_reconnect;
+
+#[cfg(unix)]
+#[path = "tests/navigation_reconnect_tests.rs"]
+mod navigation_reconnect;

@@ -973,8 +973,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     request_id: request_ids.next(),
                     params: TurnStartParams {
                         thread_id: primary_thread_id_for_span.clone(),
+                        turn_trigger: None,
                         client_user_message_id: None,
                         input: items.into_iter().map(Into::into).collect(),
+                        tool_output: None,
                         responsesapi_client_metadata: None,
                         additional_context: None,
                         environments: None,
@@ -993,6 +995,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         output_schema,
                         collaboration_mode: None,
                         multi_agent_mode: None,
+                        cyber_access_program: None,
                     },
                 },
                 "turn/start",
@@ -1416,6 +1419,10 @@ fn should_process_notification(
             .thread_id
             .as_deref()
             .is_none_or(|candidate| candidate == thread_id),
+        ServerNotification::AuthRecoveryStarted(notification)
+        | ServerNotification::AuthRecoveryCompleted(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
         ServerNotification::Error(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }

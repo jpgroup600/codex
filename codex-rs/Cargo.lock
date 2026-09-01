@@ -2271,6 +2271,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "codex-apply-patch",
+ "codex-async-utils",
  "codex-exec-server",
  "codex-install-context",
  "codex-linux-sandbox",
@@ -2572,8 +2573,8 @@ dependencies = [
  "codex-code-mode-protocol",
  "codex-http-client",
  "codex-install-context",
+ "codex-otel",
  "codex-protocol",
- "codex-websocket-client",
  "futures",
  "http-body-util",
  "pretty_assertions",
@@ -2581,7 +2582,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde_json",
  "tokio",
- "tokio-tungstenite",
  "tokio-util",
  "tonic",
  "tower",
@@ -2599,6 +2599,7 @@ dependencies = [
  "codex-code-mode",
  "codex-code-mode-protocol",
  "codex-code-mode-runtime",
+ "codex-otel",
  "codex-protocol",
  "codex-utils-cargo-bin",
  "futures",
@@ -2608,7 +2609,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite",
  "tokio-util",
  "tonic",
  "tracing",
@@ -2638,10 +2638,12 @@ dependencies = [
 name = "codex-code-mode-runtime"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "codex-code-mode-protocol",
  "codex-protocol",
  "deno_core_icudata",
  "futures",
+ "opentelemetry",
  "pretty_assertions",
  "serde_json",
  "tokio",
@@ -2704,6 +2706,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-config-schema"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codex-config",
+]
+
+[[package]]
 name = "codex-connectors"
 version = "0.0.0"
 dependencies = [
@@ -2759,7 +2770,6 @@ dependencies = [
  "base64 0.22.1",
  "bm25",
  "chrono",
- "clap",
  "codex-agent-graph-store",
  "codex-agent-roles",
  "codex-analytics",
@@ -2783,6 +2793,7 @@ dependencies = [
  "codex-feedback",
  "codex-file-system",
  "codex-git-utils",
+ "codex-guardian-context",
  "codex-history",
  "codex-home",
  "codex-hooks",
@@ -3092,8 +3103,15 @@ dependencies = [
 name = "codex-exec-server-test-support"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "codex-exec-server",
  "codex-http-client",
+ "futures",
+ "prost",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "wiremock",
 ]
 
 [[package]]
@@ -3200,9 +3218,13 @@ name = "codex-feedback"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "codex-http-client",
  "codex-login",
  "codex-protocol",
+ "flate2",
+ "http 1.4.0",
+ "httpdate",
  "log",
  "mime_guess",
  "pretty_assertions",
@@ -3316,6 +3338,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-guardian-context"
+version = "0.0.0"
+dependencies = [
+ "codex-protocol",
+ "pretty_assertions",
+ "serde_json",
+]
+
+[[package]]
 name = "codex-guardian-v2"
 version = "0.0.0"
 dependencies = [
@@ -3324,18 +3355,24 @@ dependencies = [
  "codex-core",
  "codex-extension-api",
  "codex-features",
+ "codex-guardian-context",
+ "codex-history",
  "codex-http-client",
  "codex-login",
  "codex-model-provider",
  "codex-model-provider-info",
+ "codex-models-manager",
+ "codex-network-proxy",
  "codex-protocol",
  "core_test_support",
+ "dirs",
  "http 1.4.0",
  "pretty_assertions",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3365,6 +3402,7 @@ dependencies = [
  "codex-protocol",
  "codex-tools",
  "codex-utils-output-truncation",
+ "core_test_support",
  "http 1.4.0",
  "pretty_assertions",
  "serde_json",
@@ -3506,11 +3544,13 @@ dependencies = [
  "landlock",
  "libc",
  "pretty_assertions",
+ "rustix 1.1.4",
  "seccompiler",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "test-case",
  "tokio",
  "url",
 ]
@@ -3578,6 +3618,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "assert_matches",
  "async-channel",
  "codex-api",
  "codex-async-utils",
@@ -3595,6 +3636,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-plugins",
  "futures",
+ "insta",
  "lru",
  "pretty_assertions",
  "regex-lite",
@@ -3614,12 +3656,15 @@ dependencies = [
 name = "codex-mcp-extension"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "axum",
  "codex-config",
  "codex-connectors",
  "codex-connectors-extension",
  "codex-core",
  "codex-core-plugins",
  "codex-exec-server",
+ "codex-exec-server-test-support",
  "codex-extension-api",
  "codex-features",
  "codex-login",
@@ -3628,11 +3673,13 @@ dependencies = [
  "codex-protocol",
  "codex-utils-absolute-path",
  "codex-utils-path-uri",
+ "futures",
  "pretty_assertions",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -3919,6 +3966,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-plugins",
  "pretty_assertions",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3962,6 +4010,7 @@ dependencies = [
  "codex-utils-redacted-string",
  "codex-utils-string",
  "encoding_rs",
+ "gix-url",
  "globset",
  "http 1.4.0",
  "icu_decimal",
@@ -4006,6 +4055,19 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "codex-realtime-webrtc"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-install-context",
+ "codex-utils-pty",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4767,6 +4829,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-voice-host"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-install-context",
+ "codex-process-hardening",
+ "codex-realtime-webrtc",
+ "codex-utils-cargo-bin",
+ "pretty_assertions",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "codex-web-search-extension"
 version = "0.0.0"
 dependencies = [
@@ -4842,6 +4918,20 @@ dependencies = [
  "tokio",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "codex-worktree"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-git-utils",
+ "codex-protocol",
+ "dunce",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
