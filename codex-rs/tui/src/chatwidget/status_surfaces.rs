@@ -79,7 +79,9 @@ impl StatusSurfaceSelections {
         self.status_line_items.iter().any(|item| {
             matches!(
                 item,
-                StatusLineItem::ThreadCredits | StatusLineItem::EstimatedThreadCost
+                StatusLineItem::ThreadCredits
+                    | StatusLineItem::EstimatedThreadCost
+                    | StatusLineItem::TokenUsageBreakdown
             )
         }) || self.terminal_title_items.iter().any(|item| {
             matches!(
@@ -751,6 +753,24 @@ impl ChatWidget {
                     format_tokens_compact(self.status_line_total_usage().output_tokens)
                 )
             }),
+            StatusLineItem::TokenUsageBreakdown => (!self.token_usage_pending).then(|| {
+                let usage = self.status_line_total_usage();
+                let mut value = format!(
+                    "{} uncached in + {} cached + {} out",
+                    format_tokens_compact(usage.non_cached_input()),
+                    format_tokens_compact(usage.cached_input()),
+                    format_tokens_compact(usage.output_tokens)
+                );
+                if let Some(cost) = self
+                    .estimated_thread_usage()
+                    .and_then(|usage| usage.estimated_usage_usd_micros)
+                    .and_then(format_estimated_usd_micros)
+                {
+                    value.push_str(" · ");
+                    value.push_str(&cost);
+                }
+                value
+            }),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
                 .map(|usage| usage.estimated_usage_credits_micros)
@@ -828,6 +848,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
             StatusSurfacePreviewItem::TotalInputTokens => StatusLineItem::TotalInputTokens,
             StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
+            StatusSurfacePreviewItem::TokenUsageBreakdown => StatusLineItem::TokenUsageBreakdown,
             StatusSurfacePreviewItem::ThreadCredits => StatusLineItem::ThreadCredits,
             StatusSurfacePreviewItem::EstimatedThreadCost => StatusLineItem::EstimatedThreadCost,
             StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,

@@ -2839,6 +2839,43 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 }
 
 #[tokio::test]
+async fn status_line_token_usage_breakdown_footer_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.config.tui_status_line = Some(vec!["token-usage-breakdown".to_string()]);
+    let usage = TokenUsage {
+        input_tokens: 12_500,
+        cached_input_tokens: 10_000,
+        output_tokens: 750,
+        total_tokens: 13_250,
+        ..TokenUsage::default()
+    };
+    handle_token_count(
+        &mut chat,
+        Some(TokenUsageInfo {
+            total_token_usage: usage.clone(),
+            last_token_usage: usage,
+            model_context_window: Some(200_000),
+        }),
+    );
+    chat.refresh_status_line();
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+    terminal
+        .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+        .expect("draw token-usage footer");
+    assert_chatwidget_snapshot!(
+        "status_line_token_usage_breakdown_footer",
+        normalized_backend_snapshot(terminal.backend())
+    );
+}
+
+#[tokio::test]
 async fn status_line_context_used_renders_labeled_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
