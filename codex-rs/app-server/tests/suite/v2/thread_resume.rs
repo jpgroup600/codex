@@ -159,6 +159,100 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 const CODEX_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT: &str = "You are Codex, a coding agent based on GPT-5. You and the user share the same workspace and collaborate to achieve the user's goals.";
 
 #[tokio::test]
+async fn thread_resume_can_enable_raw_usage_events() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let reply = responses::sse(vec![
+        responses::ev_assistant_message("answer", "Continued"),
+        responses::ev_completed_with_tokens("resumed-response", /*total_tokens*/ 120),
+    ]);
+    let response_log =
+        responses::mount_sse_sequence(&server, vec![reply.clone(), reply.clone(), reply]).await;
+    let codex_home = TempDir::new()?;
+    let restored_home = TempDir::new()?;
+    mock_responses_config(&server.uri()).write(codex_home.path())?;
+    mock_responses_config(&server.uri()).write(restored_home.path())?;
+    let thread_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        "Previous coding work",
+        Some("mock_provider"),
+        /*git_info*/ None,
+    )?;
+    let mut client = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let mut restored_path = None;
+    // Cold resume, live rejoin, then restart from just the native rollout in a new home.
+    for round in 0..3 {
+        let request = client
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread_id.clone(),
+                path: restored_path.clone(),
+                experimental_raw_events: true,
+                exclude_turns: true,
+                ..Default::default()
+            })
+            .await?;
+        let resumed: ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, client.read_response(request)).await??;
+        assert_eq!(resumed.thread.id, thread_id);
+        let turn = client
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread_id.clone(),
+                input: vec![UserInput::Text {
+                    text: "Continue the coding task".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, client.read_response(turn)).await??;
+        let usage: codex_app_server_protocol::RawResponseCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            client.read_notification("rawResponse/completed"),
+        )
+        .await??;
+        assert_eq!(usage.thread_id, thread_id);
+        assert_eq!(usage.usage.expect("resumed usage").input_tokens, 120);
+        let _: codex_app_server_protocol::TurnCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            client.read_notification("turn/completed"),
+        )
+        .await??;
+        if round == 1 {
+            timeout(DEFAULT_READ_TIMEOUT, client.shutdown_gracefully()).await??;
+            let destination = restored_home
+                .path()
+                .join(format!("rollout-{thread_id}.jsonl"));
+            std::fs::copy(
+                resumed.thread.path.expect("native rollout path"),
+                &destination,
+            )?;
+            restored_path = Some(destination);
+            client = TestAppServer::builder()
+                .with_codex_home(restored_home.path())
+                .build_initialized()
+                .await?;
+        }
+    }
+    let inputs = response_log.requests();
+    assert_eq!(inputs.len(), 3);
+    assert!(
+        inputs[2]
+            .body_json()
+            .to_string()
+            .contains("Previous coding work")
+    );
+    assert!(inputs[2].body_json().to_string().contains("Continued"));
+    timeout(DEFAULT_READ_TIMEOUT, client.shutdown_gracefully()).await??;
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_resume_paginated_model_context_preserves_original_metadata() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

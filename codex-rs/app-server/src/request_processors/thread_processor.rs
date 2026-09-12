@@ -3631,6 +3631,7 @@ impl ThreadRequestProcessor {
 
         let ThreadResumeParams {
             thread_id,
+            experimental_raw_events,
             history,
             path,
             model,
@@ -3887,7 +3888,7 @@ impl ThreadRequestProcessor {
                     self.ensure_conversation_listener(
                         thread_id,
                         request_id.connection_id,
-                        /*raw_events_enabled*/ false,
+                        experimental_raw_events,
                     )
                     .await,
                     thread_id,
@@ -4259,6 +4260,9 @@ impl ThreadRequestProcessor {
                 .thread_state_manager
                 .thread_state(existing_thread_id)
                 .await;
+            if params.experimental_raw_events {
+                thread_state.lock().await.experimental_raw_events = true;
+            }
             self.ensure_listener_task_running(
                 existing_thread_id,
                 existing_thread.clone(),
