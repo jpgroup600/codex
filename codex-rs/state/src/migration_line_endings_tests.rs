@@ -35,6 +35,22 @@ fn fixture_migrator(sql: String, include_pending: bool) -> Migrator {
 }
 
 #[tokio::test]
+async fn runtime_migrations_support_spawned_tasks() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        let migrator = fixture_migrator(INITIAL_SQL.to_owned(), /*include_pending*/ false);
+        super::run_runtime_migrations(&pool, &migrator).await
+    })
+    .await
+    .unwrap()
+    .unwrap();
+}
+
+#[tokio::test]
 async fn line_endings_preserve_checksums_and_data_in_both_directions() {
     for (stored, embedded) in [
         (INITIAL_SQL.replace('\n', "\r\n"), INITIAL_SQL.to_owned()),

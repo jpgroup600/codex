@@ -66,7 +66,10 @@ pub(crate) async fn run_runtime_migrations(
     migrator: &Migrator,
 ) -> Result<(), MigrateError> {
     let mut connection = pool.acquire().await?;
-    match migrator.run(&mut *connection).await {
+    match migrator
+        .run_direct(None, &mut *connection, /*skip*/ false)
+        .await
+    {
         Err(MigrateError::VersionMismatch(_)) => {}
         result => return result,
     }
@@ -111,7 +114,7 @@ pub(crate) async fn run_runtime_migrations(
         table_name: migrator.table_name.clone(),
         create_schemas: migrator.create_schemas.clone(),
     }
-    .run(&mut *connection)
+    .run_direct(None, &mut *connection, /*skip*/ false)
     .await
 }
 
